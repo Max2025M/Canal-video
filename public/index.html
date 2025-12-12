@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Processar Vídeo • UNIVERSO TECNOLÓGICO</title>
+
+<style>
+:root{--bg:#0f1724;--card:#162033;--accent:#00eaff;--txt:#e9f0f6;--muted:#9aa6b2}
+body{margin:0;background:var(--bg);font-family:Arial;color:var(--txt)}
+.container{max-width:1000px;margin:auto;padding:20px}
+.hero{text-align:center;margin-bottom:25px}
+.hero h1{margin:0;font-size:32px;color:var(--accent)}
+.subtitle{color:var(--muted)}
+.card{background:var(--card);padding:20px;border-radius:12px;margin-bottom:20px;box-shadow:0 4px 14px #0008}
+input[type=file]{margin-bottom:10px;color:var(--txt)}
+.btn{padding:10px 16px;background:var(--accent);border:none;border-radius:8px;color:#022;font-weight:700;cursor:pointer;margin-bottom:10px;transition:0.2s}
+.btn:hover{opacity:0.8}
+.frames-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px}
+.frames-grid img{width:100%;border-radius:6px;box-shadow:0 4px 10px #0006}
+#reconstructedArea video{width:100%;max-width:100%;margin-top:12px;border-radius:10px}
+.foot{text-align:center;margin-top:15px;color:var(--muted);font-size:14px}
+</style>
+</head>
+
+<body>
+<main class="container">
+
+<header class="hero">
+<h1>Processador de Vídeo</h1>
+<p class="subtitle">Transforme vídeos em imagens e recrie vídeos a partir de frames.</p>
+</header>
+
+<section class="card">
+<h2>1. Extrair frames do vídeo</h2>
+<input id="videoInput" type="file" accept="video/*" />
+<button id="startExtract" class="btn">Extrair Frames</button>
+<div id="framesContainer" class="frames-grid"></div>
+</section>
+
+<section class="card">
+<h2>2. Reconstruir vídeo</h2>
+<input id="framesInput" type="file" multiple accept="image/*" />
+<button id="startReconstruct" class="btn">Reconstruir</button>
+<div id="reconstructedArea"></div>
+</section>
+
+<footer class="foot">UNIVERSO TECNOLÓGICO ©</footer>
+
+</main>
+
+<script>
+const videoInput = document.getElementById('videoInput');
+const framesInput = document.getElementById('framesInput');
+const startExtract = document.getElementById('startExtract');
+const startReconstruct = document.getElementById('startReconstruct');
+const framesContainer = document.getElementById('framesContainer');
+const reconstructedArea = document.getElementById('reconstructedArea');
+
+startExtract.onclick = async () => {
+    if (!videoInput.files.length) return alert("Selecione um vídeo");
+
+    startExtract.textContent = "Processando...";
+    startExtract.disabled = true;
+    framesContainer.innerHTML = "";
+
+    const form = new FormData();
+    form.append('video', videoInput.files[0]);
+
+    const res = await fetch('/api/upload', { method: 'POST', body: form });
+    const data = await res.json();
+
+    if (!res.ok) {
+        alert(data.error);
+        startExtract.textContent = "Extrair Frames";
+        startExtract.disabled = false;
+        return;
+    }
+
+    data.frames.forEach(f => {
+        const img = document.createElement('img');
+        img.src = f;
+        framesContainer.appendChild(img);
+    });
+
+    startExtract.textContent = "Extrair Frames";
+    startExtract.disabled = false;
+};
+
+startReconstruct.onclick = async () => {
+    if (!framesInput.files.length) return alert("Envie imagens");
+
+    startReconstruct.textContent = "Reconstruindo...";
+    startReconstruct.disabled = true;
+    reconstructedArea.innerHTML = "";
+
+    const form = new FormData();
+    [...framesInput.files].forEach(f => form.append('frames', f));
+
+    const res = await fetch('/api/reconstruct', { method: 'POST', body: form });
+    const data = await res.json();
+
+    if (!res.ok) {
+        alert(data.error);
+        startReconstruct.textContent = "Reconstruir";
+        startReconstruct.disabled = false;
+        return;
+    }
+
+    const vid = document.createElement('video');
+    vid.src = data.videoUrl;
+    vid.controls = true;
+    reconstructedArea.appendChild(vid);
+
+    startReconstruct.textContent = "Reconstruir";
+    startReconstruct.disabled = false;
+};
+</script>
+
+</body>
+</html>
