@@ -3,78 +3,84 @@ const multer = require("multer");
 const ffmpeg = require("fluent-ffmpeg");
 const fs = require("fs");
 const path = require("path");
+const { v4: uuidv4 } = require("uuid");
 
 const app = express();
+const PORT = process.env.PORT || 3000;
+
 app.use(express.static("public"));
+app.use("/storage", express.static(path.join(__dirname, "storage")));
+
+if (!fs.existsSync("storage")) fs.mkdirSync("storage");
+if (!fs.existsSync("uploads")) fs.mkdirSync("uploads");
 
 const upload = multer({ dest: "uploads/" });
 
-// Criar diretórios se não existirem
-["uploads", "frames", "output"].forEach(dir => {
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
-});
+function removeDir(dir) {
+    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    console.log(`[CLEANUP] Pasta removida: ${dir}`);
+}
 
-// 🔹 EXTRAI FRAMES DO VÍDEO
+// Extrair frames do vídeo
 app.post("/api/upload", upload.single("video"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "Nenhum vídeo enviado" });
 
     const videoPath = req.file.path;
-    const outDir = `frames/${Date.now()}`;
+    const id = uuidv4();
+    const framesDir = path.join(__dirname, "storage", id, "frames");
 
-    fs.mkdirSync(outDir);
-
-    console.log("Extraindo frames...");
+    fs.mkdirSync(framesDir, { recursive: true });
 
     ffmpeg(videoPath)
+        .outputOptions("-vsync 0")
+        .output(path.join(framesDir, "frame_%06d.png"))
         .on("end", () => {
-            const files = fs.readdirSync(outDir).map(f => `/${outDir}/${f}`);
-
-            console.log("Frames extraídos:", files.length);
-
-            setTimeout(() => fs.rmSync(outDir, { recursive: true, force: true }), 600000);
             fs.unlinkSync(videoPath);
-
-            res.json({ frames: files });
+            const frames = fs.readdirSync(framesDir)
+                .map(f => `/storage/${id}/frames/${f}`);
+            setTimeout(() => removeDir(path.join(__dirname, "storage", id)), 10*60*1000);
+            res.json({ id, frames });
         })
-        .on("error", err => {
-            console.error("Erro no FFmpeg:", err);
+        .on("error", (err) => {
+            removeDir(path.join(__dirname, "storage", id));
+            fs.unlinkSync(videoPath);
             res.status(500).json({ error: "Erro ao processar vídeo" });
         })
-        .save(`${outDir}/frame-%04d.png`);
+        .run();
 });
 
-
-// 🔹 RECONSTRÓI VÍDEO A PARTIR DE FRAMES
-app.post("/api/reconstruct", upload.array("frames"), async (req, res) => {
+// Reconstruir vídeo a partir dos frames
+app.post("/api/reconstruct", upload.array("frames", 3000), async (req, res) => {
     if (!req.files.length) return res.status(400).json({ error: "Nenhuma imagem enviada" });
 
-    const dir = `frames/${Date.now()}`;
-    const output = `output/${Date.now()}.mp4`;
+    const id = uuidv4();
+    const baseDir = path.join(__dirname, "storage", id);
+    const framesDir = path.join(baseDir, "frames");
+    const outputDir = path.join(baseDir, "output");
+    const outputVideo = path.join(outputDir, "reconstructed.mp4");
 
-    fs.mkdirSync(dir);
+    fs.mkdirSync(framesDir, { recursive: true });
+    fs.mkdirSync(outputDir, { recursive: true });
 
-    req.files.forEach((f, i) => {
-        fs.renameSync(f.path, `${dir}/frame-${String(i).padStart(4, "0")}.png`);
+    req.files.forEach((file, i) => {
+        const newPath = path.join(framesDir, `frame_${String(i).padStart(6,"0")}.png`);
+        fs.renameSync(file.path, newPath);
     });
 
-    console.log("Reconstruindo vídeo...");
-
-    ffmpeg(`${dir}/frame-%04d.png`)
-        .inputFPS(30)
+    ffmpeg()
+        .addInput(path.join(framesDir, "frame_%06d.png"))
+        .inputFPS(25)
+        .outputOptions(["-c:v libx264", "-pix_fmt yuv420p"])
+        .output(outputVideo)
         .on("end", () => {
-            console.log("Vídeo reconstruído:", output);
-
-            setTimeout(() => fs.rmSync(dir, { recursive: true, force: true }), 600000);
-            setTimeout(() => fs.unlinkSync(output), 600000);
-
-            res.json({ videoUrl: "/" + output });
+            setTimeout(() => removeDir(baseDir), 10*60*1000);
+            res.json({ videoUrl: `/storage/${id}/output/reconstructed.mp4` });
         })
-        .on("error", err => {
-            console.error("Erro na reconstrução:", err);
+        .on("error", (err) => {
+            removeDir(baseDir);
             res.status(500).json({ error: "Falha ao reconstruir vídeo" });
         })
-        .save(output);
+        .run();
 });
 
-// Servidor
-app.listen(3000, () => console.log("Servidor rodando na porta 3000"));
+app.listen(PORT, () => console.log(`[SERVER] Rodando na porta ${PORT}`));
