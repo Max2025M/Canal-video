@@ -8,6 +8,7 @@
   "dependencies": {
     "express": "*",
     "multer": "*",
-    "fluent-ffmpeg": "*"
+    "fluent-ffmpeg": "*",
+    "uuid": "*"
   }
 }
