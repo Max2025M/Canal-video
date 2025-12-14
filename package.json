@@ -1,15 +1,12 @@
 {
-  "name": "video-frame-processor",
+  "name": "audio-silence-remover",
   "version": "1.0.0",
   "type": "module",
-  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "*",
-    "multer": "*",
-    "fluent-ffmpeg": "*",
-    "uuid": "*"
+    "multer": "*"
   }
 }
