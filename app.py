@@ -11,17 +11,17 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 progress_dict = {}  # Para armazenar progresso por arquivo
 
-def remove_silence_preserve_volume(audio_path, output_path, file_id):
+def remove_silence_and_restore(audio_path, output_path, file_id):
     print(f"[LOG] Processando arquivo: {audio_path}")
 
-    # Carregar e normalizar áudio para mono 16-bit PCM 16kHz
-    audio = AudioSegment.from_file(audio_path)
-    audio = audio.set_channels(1)
-    audio = audio.set_frame_rate(16000)
-    audio = audio.set_sample_width(2)  # 16-bit PCM
+    # Carregar áudio original
+    original_audio = AudioSegment.from_file(audio_path)
+    orig_channels = original_audio.channels
+    orig_frame_rate = original_audio.frame_rate
+    orig_sample_width = original_audio.sample_width
 
-    original_dBFS = audio.dBFS  # Salva o volume original
-
+    # Normalizar para mono 16-bit PCM 16kHz para VAD
+    audio = original_audio.set_channels(1).set_frame_rate(16000).set_sample_width(2)
     samples = audio.get_array_of_samples()
     sample_rate = audio.frame_rate
     vad = webrtcvad.Vad(2)  # Sensibilidade média
@@ -43,15 +43,17 @@ def remove_silence_preserve_volume(audio_path, output_path, file_id):
                 new_audio += audio[start_ms:end_ms]
         except Exception as e:
             print(f"[WARN] Frame ignorado: {e}")
-        # Atualiza progresso
         progress_dict[file_id] = min(100, int((i / (frame_size // audio.frame_width)) / total_frames * 100))
 
-    # Ajusta volume final para igualar ao original
-    if len(new_audio) > 0:
-        change_in_dBFS = original_dBFS - new_audio.dBFS
-        new_audio = new_audio.apply_gain(change_in_dBFS)
+    # Aumenta volume do áudio final
+    new_audio += 6  # +6dB, ajuste se necessário
 
-    # Exporta como MP3
+    # Desnormalizar: restaurar canais, taxa e sample width originais
+    new_audio = new_audio.set_channels(orig_channels)
+    new_audio = new_audio.set_frame_rate(orig_frame_rate)
+    new_audio = new_audio.set_sample_width(orig_sample_width)
+
+    # Exportar como MP3
     new_audio.export(output_path, format="mp3")
     progress_dict[file_id] = 100
     print(f"[LOG] Processamento concluído e áudio final exportado: {output_path}")
@@ -75,7 +77,8 @@ def upload():
     file_id = file.filename.replace(" ", "_")
     output_path = os.path.join(UPLOAD_FOLDER, "processed_" + file.filename)
 
-    thread = threading.Thread(target=remove_silence_preserve_volume, args=(filepath, output_path, file_id))
+    # Processar em thread
+    thread = threading.Thread(target=remove_silence_and_restore, args=(filepath, output_path, file_id))
     thread.start()
 
     return jsonify({"file_id": file_id, "filename": file.filename})
