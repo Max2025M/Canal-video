@@ -11,7 +11,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 progress_dict = {}  # Para armazenar progresso por arquivo
 
-def remove_silence(audio_path, output_path, file_id):
+def remove_silence_preserve_volume(audio_path, output_path, file_id):
     print(f"[LOG] Processando arquivo: {audio_path}")
 
     # Carregar e normalizar áudio para mono 16-bit PCM 16kHz
@@ -19,6 +19,8 @@ def remove_silence(audio_path, output_path, file_id):
     audio = audio.set_channels(1)
     audio = audio.set_frame_rate(16000)
     audio = audio.set_sample_width(2)  # 16-bit PCM
+
+    original_dBFS = audio.dBFS  # Salva o volume original
 
     samples = audio.get_array_of_samples()
     sample_rate = audio.frame_rate
@@ -44,9 +46,15 @@ def remove_silence(audio_path, output_path, file_id):
         # Atualiza progresso
         progress_dict[file_id] = min(100, int((i / (frame_size // audio.frame_width)) / total_frames * 100))
 
+    # Ajusta volume final para igualar ao original
+    if len(new_audio) > 0:
+        change_in_dBFS = original_dBFS - new_audio.dBFS
+        new_audio = new_audio.apply_gain(change_in_dBFS)
+
+    # Exporta como MP3
     new_audio.export(output_path, format="mp3")
     progress_dict[file_id] = 100
-    print(f"[LOG] Processamento concluído: {output_path}")
+    print(f"[LOG] Processamento concluído e áudio final exportado: {output_path}")
 
 @app.route("/")
 def index():
@@ -67,7 +75,7 @@ def upload():
     file_id = file.filename.replace(" ", "_")
     output_path = os.path.join(UPLOAD_FOLDER, "processed_" + file.filename)
 
-    thread = threading.Thread(target=remove_silence, args=(filepath, output_path, file_id))
+    thread = threading.Thread(target=remove_silence_preserve_volume, args=(filepath, output_path, file_id))
     thread.start()
 
     return jsonify({"file_id": file_id, "filename": file.filename})
