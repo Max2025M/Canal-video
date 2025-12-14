@@ -5,20 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Remover Silêncio do Áudio</title>
 <style>
-body {
-  font-family: Arial, sans-serif;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 20px;
-  background: #f4f4f9;
-}
+body { font-family: Arial; display: flex; flex-direction: column; align-items: center; padding: 20px; background: #f4f4f9; }
 h1 { color: #333; }
 input, button { padding: 10px; margin: 10px 0; border-radius: 5px; border: 1px solid #ccc; }
 button { cursor: pointer; background-color: #007bff; color: #fff; border: none; }
 button:hover { background-color: #0056b3; }
 .audio-container { margin-top: 20px; text-align: center; }
 .audio-container audio { width: 100%; max-width: 500px; margin-top: 10px; }
+canvas { border:1px solid #ccc; margin-top:10px; width:100%; max-width:500px; }
 a { display: inline-block; margin-top: 10px; color: #007bff; text-decoration: none; }
 a:hover { text-decoration: underline; }
 </style>
@@ -26,12 +20,14 @@ a:hover { text-decoration: underline; }
 <body>
 
 <h1>Remover Silêncio do Áudio</h1>
-
 <input type="file" id="audioFile" accept="audio/*">
 <button onclick="processAudio()">Remover Silêncio</button>
 
-<div class="audio-container" id="audioContainer"></div>
+<div class="audio-container" id="audioContainer">
+  <canvas id="waveform"></canvas>
+</div>
 
+<script src="waveform.js"></script>
 <script>
 async function processAudio() {
   const fileInput = document.getElementById("audioFile");
@@ -52,8 +48,11 @@ async function processAudio() {
     container.innerHTML = `
       <p>Áudio processado! Duração final: ${data.duration} segundos</p>
       <audio controls src="${data.processedAudioUrl}"></audio>
+      <canvas id="waveform"></canvas>
       <a href="${data.processedAudioUrl}" download="audio_processado">Baixar Áudio</a>
     `;
+
+    drawWaveform(data.processedAudioUrl);
   } catch (err) {
     container.innerHTML = "Erro ao processar áudio.";
     console.error(err);
