@@ -1,11 +1,13 @@
-FROM node:20-bullseye
-
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+FROM python:3.12-slim
 
 WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
 
-EXPOSE 3000
-CMD ["npm", "start"]
+COPY . /app
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+RUN mkdir uploads
+
+EXPOSE 5000
+
+CMD ["python", "app.py"]
