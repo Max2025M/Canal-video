@@ -5,60 +5,131 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Remover Silêncio do Áudio</title>
 <style>
-body { font-family: Arial; display: flex; flex-direction: column; align-items: center; padding: 20px; background: #f4f4f9; }
-h1 { color: #333; }
-input, button { padding: 10px; margin: 10px 0; border-radius: 5px; border: 1px solid #ccc; }
-button { cursor: pointer; background-color: #007bff; color: #fff; border: none; }
-button:hover { background-color: #0056b3; }
-.audio-container { margin-top: 20px; text-align: center; }
-.audio-container audio { width: 100%; max-width: 500px; margin-top: 10px; }
-canvas { border:1px solid #ccc; margin-top:10px; width:100%; max-width:500px; }
-a { display: inline-block; margin-top: 10px; color: #007bff; text-decoration: none; }
-a:hover { text-decoration: underline; }
+    body {
+        font-family: Arial, sans-serif;
+        background: #121212;
+        color: #fff;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        min-height: 100vh;
+        margin: 0;
+        padding: 20px;
+    }
+    h1 { margin-bottom: 20px; color: #00bfff; }
+    form {
+        background: #1e1e1e;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        width: 100%;
+        max-width: 400px;
+    }
+    input[type="file"] {
+        padding: 10px;
+        border-radius: 8px;
+        border: none;
+        background: #333;
+        color: #fff;
+    }
+    button {
+        padding: 12px;
+        border-radius: 8px;
+        border: none;
+        background: #00bfff;
+        color: #fff;
+        font-size: 16px;
+        cursor: pointer;
+        transition: 0.3s;
+    }
+    button:hover { background: #009acd; }
+    .progress-container {
+        margin-top: 20px;
+        width: 100%;
+        max-width: 400px;
+        background: #333;
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    .progress-bar {
+        height: 20px;
+        width: 0%;
+        background: #00ff7f;
+        text-align: center;
+        line-height: 20px;
+        color: #000;
+        font-weight: bold;
+    }
+    audio { margin-top: 20px; width: 100%; max-width: 400px; }
+    a.download-btn {
+        margin-top: 10px;
+        display: inline-block;
+        padding: 10px 15px;
+        background: #00ff7f;
+        color: #000;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: bold;
+    }
+    a.download-btn:hover { background: #00cc66; }
 </style>
 </head>
 <body>
-
 <h1>Remover Silêncio do Áudio</h1>
-<input type="file" id="audioFile" accept="audio/*">
-<button onclick="processAudio()">Remover Silêncio</button>
+<form id="uploadForm">
+    <input type="file" name="audio_file" accept="audio/*" required>
+    <button type="submit">Processar Áudio</button>
+</form>
 
-<div class="audio-container" id="audioContainer">
-  <canvas id="waveform"></canvas>
+<div class="progress-container" style="display:none;">
+    <div class="progress-bar" id="progressBar">0%</div>
 </div>
 
-<script src="waveform.js"></script>
+<div id="audioContainer" style="display:none;">
+    <audio controls id="audioPlayer"></audio>
+    <a class="download-btn" id="downloadBtn" href="#" download>Baixar Áudio Final</a>
+</div>
+
 <script>
-async function processAudio() {
-  const fileInput = document.getElementById("audioFile");
-  if (!fileInput.files.length) return alert("Selecione um arquivo de áudio");
+document.getElementById("uploadForm").addEventListener("submit", function(e){
+    e.preventDefault();
+    const formData = new FormData(this);
 
-  const formData = new FormData();
-  formData.append("audio", fileInput.files[0]);
+    fetch("/upload", { method: "POST", body: formData })
+        .then(res => res.json())
+        .then(data => {
+            const fileId = data.file_id;
+            const filename = data.filename;
+            const progressBar = document.getElementById("progressBar");
+            const container = document.querySelector(".progress-container");
+            container.style.display = "block";
 
-  const container = document.getElementById("audioContainer");
-  container.innerHTML = "Processando...";
+            const audioContainer = document.getElementById("audioContainer");
+            audioContainer.style.display = "none";
 
-  try {
-    const response = await fetch("/process-audio", { method: "POST", body: formData });
-    if (!response.ok) throw new Error("Erro ao processar áudio");
-
-    const data = await response.json();
-
-    container.innerHTML = `
-      <p>Áudio processado! Duração final: ${data.duration} segundos</p>
-      <audio controls src="${data.processedAudioUrl}"></audio>
-      <canvas id="waveform"></canvas>
-      <a href="${data.processedAudioUrl}" download="audio_processado">Baixar Áudio</a>
-    `;
-
-    drawWaveform(data.processedAudioUrl);
-  } catch (err) {
-    container.innerHTML = "Erro ao processar áudio.";
-    console.error(err);
-  }
-}
+            const interval = setInterval(() => {
+                fetch(`/progress/${fileId}`)
+                    .then(res => res.json())
+                    .then(progressData => {
+                        let prog = progressData.progress;
+                        progressBar.style.width = prog + "%";
+                        progressBar.innerText = prog + "%";
+                        if(prog >= 100){
+                            clearInterval(interval);
+                            audioContainer.style.display = "block";
+                            const player = document.getElementById("audioPlayer");
+                            player.src = `/download/${fileId}`;
+                            const downloadBtn = document.getElementById("downloadBtn");
+                            downloadBtn.href = `/download/${fileId}`;
+                        }
+                    });
+            }, 500);
+        });
+});
 </script>
-
 </body>
 </html>
