@@ -3,7 +3,6 @@ from pydub import AudioSegment
 import webrtcvad
 import os
 import threading
-import time
 
 app = Flask(__name__)
 
@@ -13,33 +12,43 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 progress_dict = {}  # Para armazenar progresso por arquivo
 
 def remove_silence(audio_path, output_path, file_id):
+    print(f"[LOG] Processando arquivo: {audio_path}")
+
+    # Carregar e normalizar áudio para mono 16-bit PCM 16kHz
     audio = AudioSegment.from_file(audio_path)
+    audio = audio.set_channels(1)
+    audio = audio.set_frame_rate(16000)
+    audio = audio.set_sample_width(2)  # 16-bit PCM
+
     samples = audio.get_array_of_samples()
     sample_rate = audio.frame_rate
+    vad = webrtcvad.Vad(2)  # Sensibilidade média
 
-    vad = webrtcvad.Vad(2)
     frame_ms = 30
     frame_size = int(sample_rate * frame_ms / 1000) * audio.frame_width
 
     new_audio = AudioSegment.empty()
-    total_frames = len(samples) // frame_size
+    total_frames = len(samples) // (frame_size // audio.frame_width)
 
-    for i in range(0, len(samples), frame_size):
-        frame = samples[i:i+frame_size].tobytes()
-        if len(frame) < frame_size:
-            break
-        if vad.is_speech(frame, sample_rate):
-            start_ms = i * 1000 // sample_rate
-            end_ms = (i + frame_size) * 1000 // sample_rate
-            new_audio += audio[start_ms:end_ms]
+    for i in range(0, len(samples), frame_size // audio.frame_width):
+        frame = samples[i:i + frame_size // audio.frame_width].tobytes()
+        if len(frame) != frame_size:
+            continue  # ignora frames incompletos
+        try:
+            if vad.is_speech(frame, sample_rate):
+                start_ms = i * 1000 // sample_rate
+                end_ms = (i + frame_size // audio.frame_width) * 1000 // sample_rate
+                new_audio += audio[start_ms:end_ms]
+        except Exception as e:
+            print(f"[WARN] Frame ignorado: {e}")
         # Atualiza progresso
-        progress_dict[file_id] = min(100, int((i/frame_size)/total_frames*100))
+        progress_dict[file_id] = min(100, int((i / (frame_size // audio.frame_width)) / total_frames * 100))
 
     new_audio.export(output_path, format="mp3")
     progress_dict[file_id] = 100
     print(f"[LOG] Processamento concluído: {output_path}")
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/")
 def index():
     return render_template("index.html")
 
@@ -58,7 +67,6 @@ def upload():
     file_id = file.filename.replace(" ", "_")
     output_path = os.path.join(UPLOAD_FOLDER, "processed_" + file.filename)
 
-    # Inicia thread para processar áudio
     thread = threading.Thread(target=remove_silence, args=(filepath, output_path, file_id))
     thread.start()
 
