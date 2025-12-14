@@ -9,79 +9,123 @@ app = Flask(__name__)
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-progress_dict = {}  # Para armazenar progresso por arquivo
+progress_dict = {}
 
-def remove_silence_and_restore(audio_path, output_path, file_id):
-    print(f"[LOG] Processando arquivo: {audio_path}")
+# ===============================
+# FUNÇÃO PRINCIPAL (ROBUSTA)
+# ===============================
+def remove_silence_long_audio(audio_path, output_path, file_id):
+    print(f"[LOG] Iniciando processamento: {audio_path}")
 
-    # Carregar áudio original
-    original_audio = AudioSegment.from_file(audio_path)
-    orig_channels = original_audio.channels
-    orig_frame_rate = original_audio.frame_rate
-    orig_sample_width = original_audio.sample_width
+    # ----- carregar áudio original -----
+    original = AudioSegment.from_file(audio_path)
+    orig_channels = original.channels
+    orig_rate = original.frame_rate
+    orig_width = original.sample_width
+    duration_ms = len(original)
 
-    # Normalizar para mono 16-bit PCM 16kHz para VAD
-    audio = original_audio.set_channels(1).set_frame_rate(16000).set_sample_width(2)
-    samples = audio.get_array_of_samples()
-    sample_rate = audio.frame_rate
-    vad = webrtcvad.Vad(2)  # Sensibilidade média
+    # ----- normalizar SOMENTE para VAD -----
+    vad_audio = (
+        original
+        .set_channels(1)
+        .set_frame_rate(16000)
+        .set_sample_width(2)  # PCM 16-bit
+    )
+
+    vad = webrtcvad.Vad(2)
 
     frame_ms = 30
-    frame_size = int(sample_rate * frame_ms / 1000) * audio.frame_width
+    frame_bytes = int(16000 * frame_ms / 1000) * 2  # 16kHz * 2 bytes
+    raw = vad_audio.raw_data
 
-    new_audio = AudioSegment.empty()
-    total_frames = len(samples) // (frame_size // audio.frame_width)
+    voiced_ranges = []
+    in_voice = False
+    start_ms = 0
 
-    for i in range(0, len(samples), frame_size // audio.frame_width):
-        frame = samples[i:i + frame_size // audio.frame_width].tobytes()
-        if len(frame) != frame_size:
-            continue  # ignora frames incompletos
-        try:
-            if vad.is_speech(frame, sample_rate):
-                start_ms = i * 1000 // sample_rate
-                end_ms = (i + frame_size // audio.frame_width) * 1000 // sample_rate
-                new_audio += audio[start_ms:end_ms]
-        except Exception as e:
-            print(f"[WARN] Frame ignorado: {e}")
-        progress_dict[file_id] = min(100, int((i / (frame_size // audio.frame_width)) / total_frames * 100))
+    total_frames = len(raw) // frame_bytes
+    processed_frames = 0
 
-    # Aumenta volume do áudio final
-    new_audio += 6  # +6dB, ajuste se necessário
+    # ----- loop eficiente (SEM concatenação) -----
+    for i in range(0, len(raw), frame_bytes):
+        frame = raw[i:i + frame_bytes]
+        if len(frame) != frame_bytes:
+            break
 
-    # Desnormalizar: restaurar canais, taxa e sample width originais
-    new_audio = new_audio.set_channels(orig_channels)
-    new_audio = new_audio.set_frame_rate(orig_frame_rate)
-    new_audio = new_audio.set_sample_width(orig_sample_width)
+        is_speech = vad.is_speech(frame, 16000)
+        current_ms = int(i / len(raw) * duration_ms)
 
-    # Exportar como MP3
-    new_audio.export(output_path, format="mp3")
+        if is_speech and not in_voice:
+            start_ms = current_ms
+            in_voice = True
+
+        elif not is_speech and in_voice:
+            voiced_ranges.append((start_ms, current_ms))
+            in_voice = False
+
+        processed_frames += 1
+        progress_dict[file_id] = int((processed_frames / total_frames) * 90)
+
+    if in_voice:
+        voiced_ranges.append((start_ms, duration_ms))
+
+    print(f"[LOG] Segmentos de voz detectados: {len(voiced_ranges)}")
+
+    # ----- corte final (rápido e estável) -----
+    final_audio = AudioSegment.empty()
+    for start, end in voiced_ranges:
+        final_audio += original[start:end]
+
+    # ----- boost leve de volume -----
+    final_audio = final_audio + 4  # +4dB seguro para áudio longo
+
+    # ----- restaurar propriedades originais -----
+    final_audio = (
+        final_audio
+        .set_channels(orig_channels)
+        .set_frame_rate(orig_rate)
+        .set_sample_width(orig_width)
+    )
+
+    # ----- exportar MP3 -----
+    final_audio.export(
+        output_path,
+        format="mp3",
+        bitrate="192k"
+    )
+
     progress_dict[file_id] = 100
-    print(f"[LOG] Processamento concluído e áudio final exportado: {output_path}")
+    print(f"[LOG] Finalizado com sucesso: {output_path}")
 
+# ===============================
+# ROTAS
+# ===============================
 @app.route("/")
 def index():
     return render_template("index.html")
 
 @app.route("/upload", methods=["POST"])
 def upload():
-    if "audio_file" not in request.files:
-        return jsonify({"error": "Nenhum arquivo enviado!"}), 400
-    file = request.files["audio_file"]
-    if file.filename == "":
-        return jsonify({"error": "Nenhum arquivo selecionado!"}), 400
+    file = request.files.get("audio_file")
+    if not file or file.filename == "":
+        return jsonify({"error": "Arquivo inválido"}), 400
 
-    filepath = os.path.join(UPLOAD_FOLDER, file.filename)
-    file.save(filepath)
-    print(f"[LOG] Arquivo enviado: {file.filename}")
+    filename = file.filename.replace(" ", "_")
+    input_path = os.path.join(UPLOAD_FOLDER, filename)
+    output_path = os.path.join(UPLOAD_FOLDER, f"processed_{filename}")
 
-    file_id = file.filename.replace(" ", "_")
-    output_path = os.path.join(UPLOAD_FOLDER, "processed_" + file.filename)
+    file.save(input_path)
+    print(f"[LOG] Upload recebido: {filename}")
 
-    # Processar em thread
-    thread = threading.Thread(target=remove_silence_and_restore, args=(filepath, output_path, file_id))
+    progress_dict[filename] = 0
+
+    thread = threading.Thread(
+        target=remove_silence_long_audio,
+        args=(input_path, output_path, filename),
+        daemon=True
+    )
     thread.start()
 
-    return jsonify({"file_id": file_id, "filename": file.filename})
+    return jsonify({"file_id": filename})
 
 @app.route("/progress/<file_id>")
 def progress(file_id):
@@ -89,13 +133,15 @@ def progress(file_id):
 
 @app.route("/download/<file_id>")
 def download(file_id):
-    path = os.path.join(UPLOAD_FOLDER, "processed_" + file_id)
+    path = os.path.join(UPLOAD_FOLDER, f"processed_{file_id}")
     if os.path.exists(path):
         return send_file(path, as_attachment=True)
     return "Arquivo não encontrado", 404
 
+# ===============================
+# MAIN
+# ===============================
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 5000))
-    print(f"[LOG] Servidor iniciado na porta {port}")
+    print(f"[LOG] Servidor rodando na porta {port}")
     app.run(host="0.0.0.0", port=port)
