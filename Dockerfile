@@ -1,14 +1,19 @@
-FROM node:18
+# Usar imagem oficial Node.js com ffmpeg instalado
+FROM node:20-bullseye
 
+# Instalar ffmpeg e ffprobe
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
+# Criar diretório de trabalho
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
+# Copiar arquivos
+COPY package*.json ./
 RUN npm install
-
 COPY . .
 
-RUN apt-get update && apt-get install -y ffmpeg
-
+# Expor porta
 EXPOSE 3000
 
+# Comando para iniciar o servidor
 CMD ["npm", "start"]
